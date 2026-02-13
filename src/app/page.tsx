@@ -397,6 +397,27 @@ export default function Home() {
                 </section>
               )}
 
+              {/* Feedback Call-to-Action Card */}
+              <div className="mt-8 p-6 bg-blue-50 border border-blue-100 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="space-y-1 text-center md:text-left">
+                  <h4 className="font-bold text-blue-900 flex items-center justify-center md:justify-start gap-2">
+                    <span className="text-xl">📢</span> 여러분의 의견을 들려주세요!
+                  </h4>
+                  <p className="text-sm text-blue-700">
+                    MIRI는 베타 서비스 중입니다. 법률 검토 결과가 도움이 되셨나요?<br className="hidden md:block" />
+                    잠깐 시간을 내어 설문에 참여해주시면 더 나은 서비스를 만드는 데 큰 힘이 됩니다.
+                  </p>
+                </div>
+                <a
+                  href="https://forms.gle/T6HdSETTmpTXaUEv6"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors shadow-sm whitespace-nowrap flex items-center gap-2"
+                >
+                  설문조사 참여하기 <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
+
             </motion.div>
           )}
         </AnimatePresence>
@@ -413,6 +434,17 @@ export default function Home() {
             제공되는 정보는 참고용으로만 활용되어야 하며, 실제 사업 진행 시에는 반드시 변호사 등 법률 전문가의 자문을 구하셔야 합니다.
             서비스 이용에 따른 최종적인 의사결정과 법적 책임은 사용자 본인에게 있습니다.
           </p>
+          <div className="pt-4">
+            <a
+              href="https://forms.gle/T6HdSETTmpTXaUEv6"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 font-medium hover:underline"
+            >
+              <Info className="w-3 h-3" />
+              서비스 개선을 위한 설문조사 참여하기
+            </a>
+          </div>
           <p className="text-[10px] text-slate-300 pt-4">
             © 2026 MIRI System. All rights reserved.
           </p>
