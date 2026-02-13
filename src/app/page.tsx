@@ -3,8 +3,8 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Loader2, FileText, AlertTriangle, CheckCircle, XCircle, Download, ExternalLink, ChevronRight } from 'lucide-react';
-import html2canvas from 'html2canvas';
+import { Search, Loader2, FileText, AlertTriangle, CheckCircle, XCircle, Download, ExternalLink, ChevronRight, Scale, BookOpen, User, Info } from 'lucide-react';
+import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
 import { AnalysisResult, DocumentReview } from '../types';
 
@@ -13,8 +13,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
-  const [executionTime, setExecutionTime] = useState<number | null>(null); // Final time
-  const [timer, setTimer] = useState(0); // Running timer
+  const [executionTime, setExecutionTime] = useState<number | null>(null);
+  const [timer, setTimer] = useState(0);
   const reportRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -97,29 +97,43 @@ export default function Home() {
   const handleDownloadPDF = async () => {
     if (!reportRef.current) return;
 
-    const element = reportRef.current;
     try {
-      // Temporarily remove sticky/fixed elements or complex gradients if needed
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff', // Force white background
-        logging: false,
-        onclone: (document) => {
-          // Optional: Modify specific styles for PDF capture in the cloned document
+      const dataUrl = await toPng(reportRef.current, {
+        quality: 1.0,
+        backgroundColor: '#ffffff', // Clean white background for PDF
+        filter: (node) => {
+          if (node instanceof HTMLElement && node.hasAttribute('data-html2canvas-ignore')) {
+            return false;
+          }
+          return true;
         }
       });
 
-      const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const pdfHeight = pdf.internal.pageSize.getHeight();
 
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save('MIRI_Legal_Report.pdf');
+      const imgProps = pdf.getImageProperties(dataUrl);
+      const imgHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, imgHeight);
+      heightLeft -= pdfHeight;
+
+      while (heightLeft > 0) {
+        position -= pdfHeight;
+        pdf.addPage();
+        pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, imgHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      pdf.save('MIRI_Review_Report.pdf');
+
     } catch (err) {
       console.error("PDF Export Failed:", err);
-      alert("PDF 저장 중 오류가 발생했습니다. (Chrome/Edge 브라우저 권장)");
+      alert("PDF 저장 중 오류가 발생했습니다.");
     }
   };
 
@@ -145,94 +159,77 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen p-4 md:p-8 font-sans bg-gradient-to-br from-slate-50 to-blue-50/50">
-      <div className="max-w-4xl mx-auto space-y-12">
+    <main className="min-h-screen p-4 md:p-8 font-sans bg-[#fdfdfd] pb-20">
+      <div className="max-w-3xl mx-auto space-y-8 md:space-y-10">
 
-        {/* Header */}
-        <header className="text-center space-y-4 pt-10">
-          <motion.h1
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="text-4xl md:text-6xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 tracking-tight"
-          >
-            MIRI 법률 AI
-          </motion.h1>
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            className="text-slate-500 text-lg md:text-xl font-medium"
-          >
-            규제 샌드박스를 위한 인공지능 법률 검토 시스템
-          </motion.p>
+        {/* Header - Mobile Friendly */}
+        <header className="space-y-3 border-b border-slate-200 pb-6">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 md:w-10 md:h-10 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
+              <Scale className="w-5 h-5 md:w-6 md:h-6 text-white" />
+            </div>
+            <h1 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
+              MIRI Legal Review
+            </h1>
+          </div>
+          <p className="text-slate-500 text-sm md:text-base ml-1 leading-relaxed">
+            규제 샌드박스 신청 가능성 및 법령 위반 여부를 검토하는 자동화 시스템입니다.
+          </p>
         </header>
 
-        {/* Input Section */}
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="glass-panel rounded-2xl p-1"
-        >
-          <form onSubmit={handleSubmit} className="relative group">
-            <textarea
-              value={idea}
-              onChange={(e) => setIdea(e.target.value)}
-              placeholder="사업 아이디어를 자유롭게 서술하세요... (예: 거주자 우선 주차장 공유 플랫폼)"
-              className="w-full h-40 bg-white/50 text-lg p-6 rounded-xl resize-none outline-none focus:ring-2 focus:ring-blue-500/50 transition-all placeholder-slate-400 text-slate-800"
-            />
-            <div className="absolute bottom-4 right-4">
+        {/* Input Section - Responsive */}
+        <section>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 ml-1">사업 아이디어 / 시나리오 상세</label>
+              <textarea
+                value={idea}
+                onChange={(e) => setIdea(e.target.value)}
+                placeholder="검토하고 싶은 구체적인 사업 내용이나 시나리오를 입력해주세요.&#13;&#10;(예: 주택가 빈 주차면 공유 서비스의 합법성 검토)"
+                className="modern-input w-full h-40 md:h-48 p-4 md:p-5 text-sm md:text-[16px] leading-relaxed resize-none"
+              />
+            </div>
+            <div className="flex justify-end">
               <button
                 type="submit"
                 disabled={loading || !idea.trim()}
-                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/10
-                  ${loading ? 'bg-slate-200 cursor-not-allowed text-slate-400' : 'bg-blue-600 hover:bg-blue-500 text-white hover:scale-105 active:scale-95'}
-                `}
+                className="btn-primary w-full md:w-auto"
               >
                 {loading ? (
                   <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    분석 중...
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    검토 진행 중...
                   </>
                 ) : (
                   <>
-                    <Search className="w-5 h-5" />
-                    검토 시작
+                    <Search className="w-4 h-4" />
+                    검토 요청
                   </>
                 )}
               </button>
             </div>
           </form>
-        </motion.section>
+        </section>
 
-        {/* Live Logs Section (Updated Theme) */}
+        {/* Live Logs Section */}
         <AnimatePresence>
           {(loading || (logs.length > 0 && !result)) && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="glass-panel bg-slate-50 shadow-inner p-6 rounded-xl border border-slate-200 overflow-hidden"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="mt-6 bg-slate-50 rounded-lg border border-slate-200 p-4"
             >
-              <h3 className="text-slate-600 text-sm font-bold mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${loading ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`} />
-                  분석 진행 상황
-                </div>
-                {loading && <span className="font-mono text-xs text-slate-500 animate-pulse">진행 시간: {timer.toFixed(1)}s</span>}
-              </h3>
-
-              <div className="font-mono text-sm space-y-1.5 h-64 overflow-y-auto text-slate-700 custom-scrollbar p-3 bg-white rounded-lg border border-slate-200">
+              <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Processing Log</span>
+                {loading && <span className="text-xs font-mono text-slate-400">{timer.toFixed(1)}s</span>}
+              </div>
+              <div className="h-32 md:h-40 overflow-y-auto custom-scrollbar font-mono text-xs space-y-2 text-slate-600">
                 {logs.map((log, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, x: -5 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex gap-2 break-all"
-                  >
-                    <span className="text-slate-400 select-none shrink-0">›</span>
+                  <div key={i} className="flex gap-2">
+                    <span className="text-slate-300 select-none">›</span>
                     <span>{log}</span>
-                  </motion.div>
+                  </div>
                 ))}
                 <div ref={logsEndRef} />
               </div>
@@ -244,161 +241,183 @@ export default function Home() {
         <AnimatePresence>
           {result && (
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="space-y-8"
-              ref={reportRef} // For PDF Export
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.4 }}
+              className="space-y-8 pt-6"
+              ref={reportRef}
             >
-
-              {/* Verdict Card */}
-              <div className="glass-panel p-8 rounded-2xl border-l-4 border-l-blue-500 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                  <FileText className="w-48 h-48" />
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-end border-b-2 border-slate-900 pb-4 gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">검토 결과 보고서</h2>
+                  <p className="text-slate-500 text-sm mt-1">Generated by MIRI System</p>
                 </div>
-
-                <div className="relative z-10 space-y-6">
-                  <div className="flex items-center justify-between flex-wrap gap-4">
-                    <h2 className="text-3xl font-bold flex items-center gap-3 text-slate-800">
-                      <span className="bg-blue-50 text-blue-600 p-2 rounded-lg">⚖️ 검토 결과</span>
-                      <span className={`px-4 py-1 rounded-full text-sm font-bold uppercase tracking-wider
-                        ${result.verdict.verdict === 'Safe' ? 'bg-green-100 text-green-700' :
-                          result.verdict.verdict === 'Danger' ? 'bg-red-100 text-red-700' :
-                            'bg-yellow-100 text-yellow-700'}
+                <div className="flex items-center gap-2 self-end md:self-auto">
+                  {/* Visual Only Tag */}
+                  <span className={`px-3 py-1 rounded-md text-sm font-bold border
+                        ${result.verdict.verdict === 'Safe' ? 'bg-green-50 text-green-700 border-green-200' :
+                      result.verdict.verdict === 'Danger' ? 'bg-red-50 text-red-700 border-red-200' :
+                        'bg-yellow-50 text-yellow-700 border-yellow-200'}
                       `}>
-                        {getVerdictKorean(result.verdict.verdict)}
-                      </span>
-                    </h2>
+                    {getVerdictKorean(result.verdict.verdict)}
+                  </span>
+                  <button
+                    onClick={handleDownloadPDF}
+                    data-html2canvas-ignore
+                    className="btn-secondary text-xs px-3 py-1 h-8"
+                  >
+                    <Download className="w-3 h-3" /> PDF
+                  </button>
+                </div>
+              </div>
 
-                    <div className="flex items-center gap-3">
-                      {executionTime && (
-                        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg text-slate-600 text-sm font-semibold">
-                          <span>⏱️ 처리 시간:</span>
-                          <span className="text-blue-600">{executionTime.toFixed(2)}초</span>
-                        </div>
-                      )}
-
-                      {/* PDF Button (Visible on screen, hidden in PDF if logic adjusted, but usually user wants it hidden) */}
-                      <button
-                        onClick={handleDownloadPDF}
-                        data-html2canvas-ignore // Ignore this button in PDF
-                        className="flex items-center gap-2 text-sm text-slate-500 hover:text-blue-600 transition-colors bg-white/50 px-4 py-2 rounded-lg hover:bg-white"
-                      >
-                        <Download className="w-4 h-4" />
-                        PDF 저장
-                      </button>
-                    </div>
-                  </div>
-
-                  <p className="text-xl leading-relaxed text-slate-700 font-medium whitespace-pre-wrap">
-                    {result.verdict.summary || "검토 결과에 대한 상세 내용이 생성되지 않았습니다."}
+              {/* 1. Summary */}
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-slate-500" />
+                  종합 요약
+                </h3>
+                <div className="paper-panel p-5 md:p-6 bg-slate-50/50">
+                  <p className="text-slate-800 leading-7 font-medium whitespace-pre-wrap text-sm md:text-base">
+                    {result.verdict.summary}
                   </p>
 
-                  {result.verdict.citation && (
-                    <div className="mt-6 p-5 bg-slate-50/80 rounded-xl border border-slate-200/60">
-                      <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <FileText className="w-4 h-4" /> 판단 근거 (법령)
-                      </h4>
-                      <p className="text-slate-700 whitespace-pre-line leading-relaxed">
-                        {result.verdict.citation}
-                      </p>
+                  {result.verdict.key_issues && result.verdict.key_issues.length > 0 && (
+                    <div className="mt-6 space-y-3">
+                      <h4 className="text-sm font-bold text-slate-500 uppercase">주요 법적 쟁점</h4>
+                      <ul className="space-y-2">
+                        {result.verdict.key_issues.map((issue, idx) => (
+                          <li key={idx} className="flex items-start gap-2 text-sm text-slate-700">
+                            <AlertTriangle className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+                            <span className="flex-1">{issue}</span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
-
-                  <div className="space-y-3 pt-6 border-t border-slate-100">
-                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">주요 법적 쟁점</h3>
-                    <ul className="space-y-2">
-                      {result.verdict.key_issues && result.verdict.key_issues.length > 0 ? (
-                        result.verdict.key_issues.map((issue, idx) => (
-                          <li key={idx} className="flex items-start gap-3 text-slate-700 font-medium">
-                            <AlertTriangle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
-                            <span>{issue}</span>
-                          </li>
-                        ))
-                      ) : (
-                        <li className="text-slate-400 italic">식별된 주요 쟁점이 없습니다.</li>
-                      )}
-                    </ul>
-                  </div>
                 </div>
-              </div>
+              </section>
 
-              {/* Evidence List (No Cards) */}
-              <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                <div className="p-6 border-b border-slate-200/60 bg-slate-50/50">
-                  <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800">
-                    <Search className="w-5 h-5 text-blue-600" />
-                    상세 분석 보고서
-                  </h3>
-                </div>
-
-                <div className="divide-y divide-slate-100">
-                  {result.evidence.map((item, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: idx * 0.05 }}
-                      className="p-6 hover:bg-slate-50/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-bold border
-                            ${item.status === 'Prohibited' ? 'bg-red-50 text-red-700 border-red-100' :
-                            item.status === 'Permitted' ? 'bg-green-50 text-green-700 border-green-100' :
-                              'bg-slate-50 text-slate-600 border-slate-200'}
-                          `}>
-                          {getStatusKorean(item.status)}
-                        </span>
-                        <h4 className="font-bold text-lg text-slate-800">
-                          {item.law_name} <span className="text-slate-500 font-medium text-base ml-1">{item.key_clause}</span>
-                        </h4>
-                      </div>
-
-                      <p className="text-slate-700 leading-relaxed mb-3">
-                        {item.summary}
-                      </p>
-
-                      {item.url && (
-                        <a
-                          href={item.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline decoration-blue-200 underline-offset-4"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                          법령 원문 확인하기
-                        </a>
-                      )}
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-
-              {/* References List */}
-              <div className="glass-panel p-6 rounded-xl">
-                <h3 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-800">
-                  <CheckCircle className="w-5 h-5 text-blue-600" />
-                  참고 문헌
+              {/* 2. Scenario Analysis */}
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold text-slate-800 border-t border-slate-100 pt-6">
+                  분석된 시나리오 구조
                 </h3>
-                <ul className="space-y-2 list-disc list-inside text-sm text-slate-700 mt-2">
-                  {result.references.map((ref, idx) => (
-                    <li key={idx} className="break-all">
-                      <a
-                        href={ref.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-600 hover:underline hover:text-blue-800 transition-colors"
-                      >
-                        {ref.title}
-                      </a>
-                    </li>
+                <div className="paper-panel p-5 md:p-6">
+                  <h4 className="font-bold text-slate-800 mb-4">{result.scenario.name}</h4>
+                  <ul className="space-y-0 divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
+                    {result.scenario.actions.map((action: any, idx: number) => (
+                      <li key={idx} className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 p-4 bg-white text-sm">
+                        <div className="flex items-center gap-2 md:w-auto">
+                          <span className="w-6 h-6 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full text-xs font-bold shrink-0">
+                            {idx + 1}
+                          </span>
+                          <div className="font-semibold text-slate-900 md:hidden">{action.actor}</div>
+                        </div>
+
+                        <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-1 md:gap-2 ml-8 md:ml-0">
+                          <div className="font-semibold text-slate-900 hidden md:block">{action.actor}</div>
+                          <div className="text-slate-600 md:col-span-2">{action.action}</div>
+                        </div>
+                        {action.object && (
+                          <span className="text-xs bg-slate-50 text-slate-500 px-2 py-1 rounded border border-slate-100 self-start ml-8 md:ml-0 md:self-auto">
+                            {action.object}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </section>
+
+              {/* 3. Detailed Legal Evidence */}
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold text-slate-800 border-t border-slate-100 pt-6">
+                  관련 법령 상세 검토
+                </h3>
+
+                <div className="space-y-4">
+                  {Object.entries(result.evidence.reduce((acc, item) => {
+                    const key = item.law_name || '기타 자료';
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(item);
+                    return acc;
+                  }, {} as Record<string, DocumentReview[]>)).map(([lawName, items], groupIdx) => (
+                    <div key={groupIdx} className="paper-panel p-5 md:p-6">
+                      <h4 className="font-bold text-base text-slate-900 mb-4 pb-2 border-b border-slate-100">
+                        {lawName}
+                      </h4>
+                      <div className="space-y-6">
+                        {items.map((item, idx) => (
+                          <div key={idx} className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full shrink-0
+                                    ${item.status === 'Prohibited' ? 'bg-red-500' :
+                                  item.status === 'Permitted' ? 'bg-green-500' :
+                                    item.status === 'Conditional' ? 'bg-yellow-500' : 'bg-slate-300'}
+                                `} />
+                              <span className="font-semibold text-slate-800 text-sm">
+                                {item.key_clause}
+                              </span>
+                              <span className="text-xs text-slate-400">
+                                ({item.status})
+                              </span>
+                            </div>
+                            <p className="text-sm text-slate-600 leading-relaxed pl-4 border-l-2 border-slate-100 ml-1">
+                              {item.summary}
+                            </p>
+                            {item.url && (
+                              <div className="pl-4 ml-1">
+                                <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-blue-600 hover:underline flex items-center gap-1">
+                                  <ExternalLink className="w-3 h-3" /> 원문 보기
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
-                </ul>
-              </div>
+                </div>
+              </section>
+
+              {/* References */}
+              {result.references.length > 0 && (
+                <section className="pt-8 text-xs text-slate-400 border-t border-slate-200">
+                  <h5 className="font-bold mb-2 flex items-center gap-1">
+                    <BookOpen className="w-3 h-3" /> 참고 문헌
+                  </h5>
+                  <ul className="space-y-1 list-disc list-inside">
+                    {result.references.map((ref, idx) => (
+                      <li key={idx}>
+                        {ref.title}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              )}
 
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Safety Disclaimer Footer */}
+        <footer className="mt-20 pt-8 border-t border-slate-200 text-center space-y-2">
+          <div className="flex justify-center mb-2">
+            <AlertTriangle className="w-5 h-5 text-slate-400" />
+          </div>
+          <p className="text-xs text-slate-500 font-medium">
+            [면책 조항] 본 서비스는 베타 테스트 버전이며, 인공지능이 생성한 분석 결과는 법적 효력이 없습니다.
+          </p>
+          <p className="text-xs text-slate-400 leading-relaxed max-w-xl mx-auto">
+            제공되는 정보는 참고용으로만 활용되어야 하며, 실제 사업 진행 시에는 반드시 변호사 등 법률 전문가의 자문을 구하셔야 합니다.
+            서비스 이용에 따른 최종적인 의사결정과 법적 책임은 사용자 본인에게 있습니다.
+          </p>
+          <p className="text-[10px] text-slate-300 pt-4">
+            © 2026 MIRI System. All rights reserved.
+          </p>
+        </footer>
+
       </div>
     </main>
   );

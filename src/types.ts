@@ -13,8 +13,16 @@ export interface RiskReport {
     citation?: string;
 }
 
+export interface AtomicAction {
+    actor: string;
+    action: string;
+    object: string;
+}
+
 export interface Scenario {
-    main_scenario: string;
+    name: string;
+    type: string;
+    actions: AtomicAction[];
 }
 
 export interface ReferenceItem {

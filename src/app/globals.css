@@ -1,16 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f8fafc;
-  /* Slate 50 */
-  --foreground: #0f172a;
-  /* Slate 900 */
+  --background: #fdfdfd; /* warm white */
+  --foreground: #1e293b; /* slate-800 */
 }
 
 @theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-noto-sans-kr), "Noto Sans KR", sans-serif;
+  --font-sans: "Pretendard", var(--font-noto-sans-kr), -apple-system, BlinkMacSystemFont, system-ui, Roboto, "Helvetica Neue", "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif;
 }
 
 body {
@@ -18,35 +16,57 @@ body {
   background: var(--background);
   font-family: var(--font-sans);
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Glassmorphism Utilities (Light Mode) */
+/* Professional/Paper Design System */
 @layer components {
-  .glass-panel {
-    @apply bg-white/60 backdrop-blur-xl border border-white/60 shadow-xl shadow-slate-200/50;
+  /* Replaces glass-panel with a clean paper look */
+  .paper-panel {
+    @apply bg-white border border-slate-200 shadow-sm rounded-xl transition-all;
+  }
+  
+  .paper-panel:hover {
+    @apply shadow-md border-slate-300;
   }
 
-  .glass-input {
-    @apply bg-white/50 border border-slate-200 text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all;
+  /* Clean Input Field */
+  .modern-input {
+    @apply bg-white border border-slate-300 text-slate-800 placeholder-slate-400 rounded-lg focus:ring-2 focus:ring-slate-800 focus:border-transparent outline-none transition-all shadow-sm;
   }
 
-  .glass-button {
-    @apply bg-blue-600 hover:bg-blue-500 text-white font-medium shadow-lg hover:shadow-blue-500/20 transition-all active:scale-95;
+  /* Solid Professional Button */
+  .btn-primary {
+    @apply bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg px-6 py-3 transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-medium rounded-lg px-4 py-2 transition-all flex items-center justify-center gap-2 shadow-sm;
+  }
+
+  /* Typography Utilities */
+  .text-title {
+    @apply text-slate-900 font-bold tracking-tight;
+  }
+  
+  .text-body {
+    @apply text-slate-600 leading-relaxed;
   }
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbar - Minimalist */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -55,15 +75,10 @@ body {
 
 /* Log Window Scrollbar */
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: #f8fafc;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #cbd5e1;
   border-radius: 4px;
-  border: 2px solid #0f172a;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #475569;
 }
