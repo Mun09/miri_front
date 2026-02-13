@@ -10,6 +10,7 @@ export interface RiskReport {
     verdict: 'Review Required' | 'Safe' | 'Caution' | 'Danger';
     summary: string;
     key_issues: string[];
+    citation?: string;
 }
 
 export interface Scenario {

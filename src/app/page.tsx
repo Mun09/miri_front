@@ -12,7 +12,28 @@ export default function Home() {
   const [idea, setIdea] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [executionTime, setExecutionTime] = useState<number | null>(null); // Final time
+  const [timer, setTimer] = useState(0); // Running timer
   const reportRef = useRef<HTMLDivElement>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Timer Effect
+  React.useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (loading) {
+      setTimer(0);
+      interval = setInterval(() => {
+        setTimer((prev) => prev + 0.1);
+      }, 100);
+    }
+    return () => clearInterval(interval);
+  }, [loading]);
+
+  // Auto-scroll logs
+  React.useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,14 +41,53 @@ export default function Home() {
 
     setLoading(true);
     setResult(null);
+    setLogs([]);
+    setExecutionTime(null);
+    const startTime = performance.now();
 
     try {
-      // Backend URL (FastAPI)
-      const response = await axios.post('http://localhost:8000/analyze', { idea });
-      setResult(response.data);
-    } catch (error) {
+      const response = await fetch('http://localhost:8000/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idea }),
+      });
+
+      if (!response.body) throw new Error("No response body");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const data = JSON.parse(line);
+            if (data.type === 'log') {
+              setLogs(prev => [...prev, data.message]);
+            } else if (data.type === 'result') {
+              setResult(data.data);
+              const endTime = performance.now();
+              setExecutionTime((endTime - startTime) / 1000);
+            } else if (data.type === 'error') {
+              throw new Error(data.message);
+            }
+          } catch (e) {
+            console.warn("Stream parse error", e);
+          }
+        }
+      }
+    } catch (error: any) {
       console.error("Analysis Failed:", error);
-      alert("분석 중 오류가 발생했습니다. 서버 상태를 확인해주세요.");
+      alert(`분석 중 오류가 발생했습니다: ${error.message || "서버 응답 없음"}`);
+      setResult(null);
     } finally {
       setLoading(false);
     }
@@ -38,10 +98,15 @@ export default function Home() {
 
     const element = reportRef.current;
     try {
+      // Temporarily remove sticky/fixed elements or complex gradients if needed
       const canvas = await html2canvas(element, {
-        scale: 2, // High resolution
-        backgroundColor: '#0f172a', // Dark theme background
-        logging: false
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff', // Force white background
+        logging: false,
+        onclone: (document) => {
+          // Optional: Modify specific styles for PDF capture in the cloned document
+        }
       });
 
       const imgData = canvas.toDataURL('image/png');
@@ -53,7 +118,7 @@ export default function Home() {
       pdf.save('MIRI_Legal_Report.pdf');
     } catch (err) {
       console.error("PDF Export Failed:", err);
-      alert("PDF 저장 중 오류가 발생했습니다.");
+      alert("PDF 저장 중 오류가 발생했습니다. (Chrome/Edge 브라우저 권장)");
     }
   };
 
@@ -139,6 +204,41 @@ export default function Home() {
           </form>
         </motion.section>
 
+        {/* Live Logs Section (Updated Theme) */}
+        <AnimatePresence>
+          {(loading || (logs.length > 0 && !result)) && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="glass-panel bg-slate-50 shadow-inner p-6 rounded-xl border border-slate-200 overflow-hidden"
+            >
+              <h3 className="text-slate-600 text-sm font-bold mb-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${loading ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`} />
+                  분석 진행 상황
+                </div>
+                {loading && <span className="font-mono text-xs text-slate-500 animate-pulse">진행 시간: {timer.toFixed(1)}s</span>}
+              </h3>
+
+              <div className="font-mono text-sm space-y-1.5 h-64 overflow-y-auto text-slate-700 custom-scrollbar p-3 bg-white rounded-lg border border-slate-200">
+                {logs.map((log, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: -5 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex gap-2 break-all"
+                  >
+                    <span className="text-slate-400 select-none shrink-0">›</span>
+                    <span>{log}</span>
+                  </motion.div>
+                ))}
+                <div ref={logsEndRef} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Results Section */}
         <AnimatePresence>
           {result && (
@@ -157,7 +257,7 @@ export default function Home() {
                 </div>
 
                 <div className="relative z-10 space-y-6">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-4">
                     <h2 className="text-3xl font-bold flex items-center gap-3 text-slate-800">
                       <span className="bg-blue-50 text-blue-600 p-2 rounded-lg">⚖️ 검토 결과</span>
                       <span className={`px-4 py-1 rounded-full text-sm font-bold uppercase tracking-wider
@@ -169,85 +269,108 @@ export default function Home() {
                       </span>
                     </h2>
 
-                    {/* PDF Button (Visible on screen, hidden in PDF if logic adjusted, but usually user wants it hidden) */}
-                    <button
-                      onClick={handleDownloadPDF}
-                      data-html2canvas-ignore // Ignore this button in PDF
-                      className="flex items-center gap-2 text-sm text-slate-500 hover:text-blue-600 transition-colors bg-white/50 px-4 py-2 rounded-lg hover:bg-white"
-                    >
-                      <Download className="w-4 h-4" />
-                      PDF 저장
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {executionTime && (
+                        <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg text-slate-600 text-sm font-semibold">
+                          <span>⏱️ 처리 시간:</span>
+                          <span className="text-blue-600">{executionTime.toFixed(2)}초</span>
+                        </div>
+                      )}
+
+                      {/* PDF Button (Visible on screen, hidden in PDF if logic adjusted, but usually user wants it hidden) */}
+                      <button
+                        onClick={handleDownloadPDF}
+                        data-html2canvas-ignore // Ignore this button in PDF
+                        className="flex items-center gap-2 text-sm text-slate-500 hover:text-blue-600 transition-colors bg-white/50 px-4 py-2 rounded-lg hover:bg-white"
+                      >
+                        <Download className="w-4 h-4" />
+                        PDF 저장
+                      </button>
+                    </div>
                   </div>
 
                   <p className="text-xl leading-relaxed text-slate-700 font-medium whitespace-pre-wrap">
-                    {result.verdict.summary}
+                    {result.verdict.summary || "검토 결과에 대한 상세 내용이 생성되지 않았습니다."}
                   </p>
 
-                  <div className="space-y-3 pt-4">
+                  {result.verdict.citation && (
+                    <div className="mt-6 p-5 bg-slate-50/80 rounded-xl border border-slate-200/60">
+                      <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                        <FileText className="w-4 h-4" /> 판단 근거 (법령)
+                      </h4>
+                      <p className="text-slate-700 whitespace-pre-line leading-relaxed">
+                        {result.verdict.citation}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-3 pt-6 border-t border-slate-100">
                     <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">주요 법적 쟁점</h3>
                     <ul className="space-y-2">
-                      {result.verdict.key_issues.map((issue, idx) => (
-                        <li key={idx} className="flex items-start gap-3 text-slate-600">
-                          <AlertTriangle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
-                          <span>{issue}</span>
-                        </li>
-                      ))}
+                      {result.verdict.key_issues && result.verdict.key_issues.length > 0 ? (
+                        result.verdict.key_issues.map((issue, idx) => (
+                          <li key={idx} className="flex items-start gap-3 text-slate-700 font-medium">
+                            <AlertTriangle className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
+                            <span>{issue}</span>
+                          </li>
+                        ))
+                      ) : (
+                        <li className="text-slate-400 italic">식별된 주요 쟁점이 없습니다.</li>
+                      )}
                     </ul>
                   </div>
                 </div>
               </div>
 
-              {/* Evidence Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {result.evidence.map((item, idx) => (
-                  <motion.div
-                    key={idx}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.1 }}
-                    className={`glass-panel p-6 rounded-xl border-l-[3px] 
-                      ${item.status === 'Prohibited' ? 'border-l-red-500 bg-red-50' :
-                        item.status === 'Permitted' ? 'border-l-green-500 bg-green-50' :
-                          'border-l-slate-400 bg-slate-50'}
-                    `}
-                  >
-                    <div className="flex justify-between items-start mb-4">
-                      <h4 className="font-bold text-lg text-slate-800 line-clamp-1" title={item.law_name}>
-                        {item.law_name}
-                      </h4>
-                      <span className={`text-xs font-bold px-2 py-1 rounded-md ml-2 shrink-0
-                          ${item.status === 'Prohibited' ? 'bg-red-100 text-red-700' :
-                          item.status === 'Permitted' ? 'bg-green-100 text-green-700' :
-                            'bg-slate-200 text-slate-600'}
-                        `}>
-                        {getStatusKorean(item.status)}
-                      </span>
-                    </div>
+              {/* Evidence List (No Cards) */}
+              <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                <div className="p-6 border-b border-slate-200/60 bg-slate-50/50">
+                  <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800">
+                    <Search className="w-5 h-5 text-blue-600" />
+                    상세 분석 보고서
+                  </h3>
+                </div>
 
-                    <div className="space-y-3 text-sm text-slate-600">
-                      <div className="flex gap-2">
-                        <span className="font-semibold text-slate-500 min-w-[3rem]">조항:</span>
-                        <span className="text-slate-800">{item.key_clause || "관련 조항 없음"}</span>
+                <div className="divide-y divide-slate-100">
+                  {result.evidence.map((item, idx) => (
+                    <motion.div
+                      key={idx}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ delay: idx * 0.05 }}
+                      className="p-6 hover:bg-slate-50/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className={`px-2.5 py-1 rounded-md text-xs font-bold border
+                            ${item.status === 'Prohibited' ? 'bg-red-50 text-red-700 border-red-100' :
+                            item.status === 'Permitted' ? 'bg-green-50 text-green-700 border-green-100' :
+                              'bg-slate-50 text-slate-600 border-slate-200'}
+                          `}>
+                          {getStatusKorean(item.status)}
+                        </span>
+                        <h4 className="font-bold text-lg text-slate-800">
+                          {item.law_name} <span className="text-slate-500 font-medium text-base ml-1">{item.key_clause}</span>
+                        </h4>
                       </div>
-                      <div className="flex gap-2">
-                        <span className="font-semibold text-slate-500 min-w-[3rem]">요약:</span>
-                        <span className="leading-relaxed text-slate-700">{item.summary}</span>
-                      </div>
-                    </div>
 
-                    {item.url && (
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-4 inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-500 transition-colors font-semibold"
-                      >
-                        원문 보기 <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </motion.div>
-                ))}
+                      <p className="text-slate-700 leading-relaxed mb-3">
+                        {item.summary}
+                      </p>
+
+                      {item.url && (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline decoration-blue-200 underline-offset-4"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          법령 원문 확인하기
+                        </a>
+                      )}
+                    </motion.div>
+                  ))}
+                </div>
               </div>
 
               {/* References List */}
@@ -256,20 +379,20 @@ export default function Home() {
                   <CheckCircle className="w-5 h-5 text-blue-600" />
                   참고 문헌
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <ul className="space-y-2 list-disc list-inside text-sm text-slate-700 mt-2">
                   {result.references.map((ref, idx) => (
-                    <a
-                      key={idx}
-                      href={ref.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center justify-between p-3 rounded-lg bg-white/50 hover:bg-white hover:shadow-md transition-all group border border-slate-200/50"
-                    >
-                      <span className="text-sm text-slate-700 truncate w-11/12">{ref.title}</span>
-                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
-                    </a>
+                    <li key={idx} className="break-all">
+                      <a
+                        href={ref.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-600 hover:underline hover:text-blue-800 transition-colors"
+                      >
+                        {ref.title}
+                      </a>
+                    </li>
                   ))}
-                </div>
+                </ul>
               </div>
 
             </motion.div>
