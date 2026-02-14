@@ -169,11 +169,12 @@ export default function Home() {
               <Scale className="w-5 h-5 md:w-6 md:h-6 text-white" />
             </div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
-              MIRI Legal Review
+              MIRI AI 법률 자문
             </h1>
           </div>
           <p className="text-slate-500 text-sm md:text-base ml-1 leading-relaxed">
-            규제 샌드박스 신청 가능성 및 법령 위반 여부를 검토하는 자동화 시스템입니다.
+            사업 아이디어 검토부터 계약, 분쟁, 일상생활 법률 문제까지.<br className="hidden md:block" />
+            AI가 수천 건의 법령와 판례를 분석하여 핵심 법적 조언을 즉시 제공합니다.
           </p>
         </header>
 
@@ -181,12 +182,12 @@ export default function Home() {
         <section>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-700 ml-1">사업 아이디어 / 시나리오 상세</label>
+              <label className="text-sm font-semibold text-slate-700 ml-1">상담 내용 입력</label>
               <textarea
                 value={idea}
                 onChange={(e) => setIdea(e.target.value)}
-                placeholder="검토하고 싶은 구체적인 사업 내용이나 시나리오를 입력해주세요.&#13;&#10;(예: 주택가 빈 주차면 공유 서비스의 합법성 검토)"
-                className="modern-input w-full h-40 md:h-48 p-4 md:p-5 text-sm md:text-[16px] leading-relaxed resize-none"
+                placeholder="궁금한 법률 문제나 검토가 필요한 내용을 구체적으로 적어주세요.&#13;&#10;&#13;&#10;[예시]&#13;&#10;- 사업: 주택가 빈 주차면 공유 서비스가 합법인가요?&#13;&#10;- 계약: 프리랜서 용역 계약서에서 독소 조항 점검&#13;&#10;- 분쟁: 윗집 누수로 인한 피해보상 청구 절차&#13;&#10;- 일상: 회사에서 부당해고를 당했을 때 대처 방법"
+                className="modern-input w-full h-40 md:h-56 p-4 md:p-5 text-sm md:text-[16px] leading-relaxed resize-none"
               />
             </div>
             <div className="flex justify-end">
