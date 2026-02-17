@@ -279,9 +279,43 @@ export default function Home() {
                   종합 요약
                 </h3>
                 <div className="paper-panel p-5 md:p-6 bg-slate-50/50">
-                  <p className="text-slate-800 leading-7 font-medium whitespace-pre-wrap text-sm md:text-base">
-                    {result.verdict.summary}
-                  </p>
+                  <div className="text-slate-800 leading-7 font-medium whitespace-pre-wrap text-sm md:text-base">
+                    {(() => {
+                      const text = result.verdict.summary;
+                      // Click Handler
+                      const scrollToEvidence = (index: number) => {
+                        const element = document.getElementById(`evidence-${index}`);
+                        if (element) {
+                          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          // Highlight effect
+                          element.classList.add('bg-yellow-50');
+                          setTimeout(() => element.classList.remove('bg-yellow-50'), 2000);
+                        }
+                      };
+
+                      // Simple Markdown Parser
+                      const parts = text.split(/(\*\*.*?\*\*|\[\d+\])/g);
+                      return parts.map((part, index) => {
+                        if (part.startsWith('**') && part.endsWith('**')) {
+                          return <strong key={index} className="text-slate-900 font-bold bg-slate-100 px-1 rounded">{part.slice(2, -2)}</strong>;
+                        }
+                        if (/^\[(\d+)\]$/.test(part)) {
+                          const evidenceIndex = parseInt(part.match(/\d+/)?.[0] || '0');
+                          return (
+                            <button
+                              key={index}
+                              onClick={() => scrollToEvidence(evidenceIndex)}
+                              className="text-[10px] font-bold text-blue-600 ml-0.5 select-none hover:underline cursor-pointer bg-blue-50 px-1 rounded-sm align-top leading-none mt-1"
+                              title={`${evidenceIndex}번 근거 자료로 이동`}
+                            >
+                              [{evidenceIndex}]
+                            </button>
+                          );
+                        }
+                        return part;
+                      });
+                    })()}
+                  </div>
 
                   {result.verdict.key_issues && result.verdict.key_issues.length > 0 && (
                     <div className="mt-6 space-y-3">
@@ -338,47 +372,58 @@ export default function Home() {
                 </h3>
 
                 <div className="space-y-4">
-                  {Object.entries(result.evidence.reduce((acc, item) => {
-                    const key = item.law_name || '기타 자료';
-                    if (!acc[key]) acc[key] = [];
-                    acc[key].push(item);
-                    return acc;
-                  }, {} as Record<string, DocumentReview[]>)).map(([lawName, items], groupIdx) => (
-                    <div key={groupIdx} className="paper-panel p-5 md:p-6">
-                      <h4 className="font-bold text-base text-slate-900 mb-4 pb-2 border-b border-slate-100">
-                        {lawName}
-                      </h4>
-                      <div className="space-y-6">
-                        {items.map((item, idx) => (
-                          <div key={idx} className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className={`w-2 h-2 rounded-full shrink-0
-                                    ${item.status === 'Prohibited' ? 'bg-red-500' :
-                                  item.status === 'Permitted' ? 'bg-green-500' :
-                                    item.status === 'Conditional' ? 'bg-yellow-500' : 'bg-slate-300'}
-                                `} />
-                              <span className="font-semibold text-slate-800 text-sm">
-                                {item.key_clause}
-                              </span>
-                              <span className="text-xs text-slate-400">
-                                ({item.status})
-                              </span>
-                            </div>
-                            <p className="text-sm text-slate-600 leading-relaxed pl-4 border-l-2 border-slate-100 ml-1">
-                              {item.summary}
-                            </p>
-                            {item.url && (
-                              <div className="pl-4 ml-1">
-                                <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-blue-600 hover:underline flex items-center gap-1">
-                                  <ExternalLink className="w-3 h-3" /> 원문 보기
-                                </a>
+                  {(() => {
+                    let globalEvidenceIndex = 0;
+
+                    const grouped = result.evidence.reduce((acc, item) => {
+                      const key = item.law_name || '기타 자료';
+                      if (!acc[key]) acc[key] = [];
+                      acc[key].push(item);
+                      return acc;
+                    }, {} as Record<string, DocumentReview[]>);
+
+                    return Object.entries(grouped).map(([lawName, items], groupIdx) => (
+                      <div key={groupIdx} className="paper-panel p-5 md:p-6">
+                        <h4 className="font-bold text-base text-slate-900 mb-4 pb-2 border-b border-slate-100">
+                          {lawName}
+                        </h4>
+                        <div className="space-y-6">
+                          {items.map((item, idx) => {
+                            globalEvidenceIndex++;
+                            const currentId = globalEvidenceIndex;
+                            return (
+                              <div key={idx} id={`evidence-${currentId}`} className="space-y-2 transition-colors duration-1000 rounded-lg p-2 -m-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs font-bold text-slate-400 mr-1 select-none">#{currentId}</span>
+                                  <span className={`w-2 h-2 rounded-full shrink-0
+                                          ${item.status === 'Prohibited' ? 'bg-red-500' :
+                                      item.status === 'Permitted' ? 'bg-green-500' :
+                                        item.status === 'Conditional' ? 'bg-yellow-500' : 'bg-slate-300'}
+                                      `} />
+                                  <span className="font-semibold text-slate-800 text-sm">
+                                    {item.key_clause}
+                                  </span>
+                                  <span className="text-xs text-slate-400">
+                                    ({getStatusKorean(item.status)})
+                                  </span>
+                                </div>
+                                <p className="text-sm text-slate-600 leading-relaxed pl-4 border-l-2 border-slate-100 ml-1">
+                                  {item.summary}
+                                </p>
+                                {item.url && (
+                                  <div className="pl-4 ml-1">
+                                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-blue-600 hover:underline flex items-center gap-1">
+                                      <ExternalLink className="w-3 h-3" /> 원문 보기
+                                    </a>
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        ))}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </section>
 
