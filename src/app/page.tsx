@@ -1,12 +1,18 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import axios from 'axios';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Loader2, FileText, AlertTriangle, CheckCircle, XCircle, Download, ExternalLink, ChevronRight, Scale, BookOpen, User, Info } from 'lucide-react';
+import { Search, Loader2, AlertTriangle, Download, ExternalLink, Scale, BookOpen, Info, CheckSquare, Square, GitBranch, ArrowRight, Clock, ShieldAlert, Bot, User } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
-import { AnalysisResult, DocumentReview } from '../types';
+import { AnalysisResult } from '../types';
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  isSystem?: boolean;
+}
 
 export default function Home() {
   const [idea, setIdea] = useState('');
@@ -15,11 +21,21 @@ export default function Home() {
   const [logs, setLogs] = useState<string[]>([]);
   const [executionTime, setExecutionTime] = useState<number | null>(null);
   const [timer, setTimer] = useState(0);
+
+  // Persistent Chat & Session State
+  const [sessionId] = useState(() => `sess_${Math.random().toString(36).substr(2, 9)}`);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+
+  // What-If toggles
+  const [selectedWhatIfs, setSelectedWhatIfs] = useState<string[]>([]);
+
   const reportRef = useRef<HTMLDivElement>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Timer Effect
-  React.useEffect(() => {
+  useEffect(() => {
     let interval: NodeJS.Timeout;
     if (loading) {
       setTimer(0);
@@ -31,26 +47,40 @@ export default function Home() {
   }, [loading]);
 
   // Auto-scroll logs
-  React.useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  useEffect(() => {
+    const container = logsContainerRef.current;
+    if (container) {
+      const isNearBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
+      if (logs.length < 3 || isNearBottom) {
+        logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    }
   }, [logs]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!idea.trim()) return;
+  // Auto-scroll chat window
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory]);
 
+  const runAnalysis = async (currentIdea: string, whatIfs: string[]) => {
     setLoading(true);
-    setResult(null);
+    // DO NOT CLEAR RESULT. We only clear logs to show new thinking process.
     setLogs([]);
     setExecutionTime(null);
     const startTime = performance.now();
+
+    // Add User Message to Chat History
+    const userMsgId = Date.now().toString();
+    if (currentIdea.trim()) {
+      setChatHistory(prev => [...prev, { id: userMsgId, role: 'user', content: currentIdea }]);
+    }
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const response = await fetch(`${apiUrl}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea }),
+        body: JSON.stringify({ idea: currentIdea, what_ifs: whatIfs, thread_id: sessionId }),
       });
 
       if (!response.body) throw new Error("No response body");
@@ -73,10 +103,26 @@ export default function Home() {
             const data = JSON.parse(line);
             if (data.type === 'log') {
               setLogs(prev => [...prev, data.message]);
+            } else if (data.type === 'chat_message') {
+              // Add Assistant Chat Message
+              setChatHistory(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: data.message }]);
             } else if (data.type === 'result') {
+              // Update Roadmap Result
               setResult(data.data);
               const endTime = performance.now();
               setExecutionTime((endTime - startTime) / 1000);
+
+              setChatHistory(prev => [...prev, {
+                id: Date.now().toString() + "_sys",
+                role: 'assistant',
+                content: "분석이 완료되어 뒷편의 메인 로드맵이 갱신되었습니다.",
+                isSystem: true
+              }]);
+
+              // Scroll to result slightly later
+              setTimeout(() => {
+                reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }, 500);
             } else if (data.type === 'error') {
               throw new Error(data.message);
             }
@@ -87,20 +133,37 @@ export default function Home() {
       }
     } catch (error: any) {
       console.error("Analysis Failed:", error);
-      alert(`분석 중 오류가 발생했습니다: ${error.message || "서버 응답 없음"}`);
-      setResult(null);
+      setChatHistory(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: `🚨 오류 발생: ${error.message || "서버 응답 없음"}` }]);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!idea.trim()) return;
+    const submittedIdea = idea;
+    setIdea(''); // Clear input box immediately
+    // Note: We deliberately don't clear selectedWhatIfs so constraints stack
+    runAnalysis(submittedIdea, selectedWhatIfs);
+  };
+
+  const handleWhatIfToggle = (variableName: string) => {
+    const isCurrentlySelected = selectedWhatIfs.includes(variableName);
+    const newWhatIfs = isCurrentlySelected
+      ? selectedWhatIfs.filter(w => w !== variableName)
+      : [...selectedWhatIfs, variableName];
+
+    setSelectedWhatIfs(newWhatIfs);
+    runAnalysis(idea, newWhatIfs);
+  };
+
   const handleDownloadPDF = async () => {
     if (!reportRef.current) return;
-
     try {
       const dataUrl = await toPng(reportRef.current, {
         quality: 1.0,
-        backgroundColor: '#ffffff', // Clean white background for PDF
+        backgroundColor: '#ffffff',
         filter: (node) => {
           if (node instanceof HTMLElement && node.hasAttribute('data-html2canvas-ignore')) {
             return false;
@@ -129,374 +192,496 @@ export default function Home() {
         heightLeft -= pdfHeight;
       }
 
-      pdf.save('MIRI_Review_Report.pdf');
-
+      pdf.save('MIRI_Roadmap_Report.pdf');
     } catch (err) {
       console.error("PDF Export Failed:", err);
       alert("PDF 저장 중 오류가 발생했습니다.");
     }
   };
 
-  const getVerdictKorean = (verdict: string) => {
-    switch (verdict) {
-      case 'Safe': return '안전';
-      case 'Danger': return '위험';
-      case 'Caution': return '주의';
-      case 'Review Required': return '검토 필요';
-      default: return verdict;
-    }
+  const getRiskColor = (score: string) => {
+    if (score === 'Red') return 'bg-red-50 text-red-700 border-red-200';
+    if (score === 'Yellow') return 'bg-yellow-50 text-yellow-700 border-yellow-200';
+    if (score === 'Green') return 'bg-green-50 text-green-700 border-green-200';
+    return 'bg-slate-50 text-slate-700 border-slate-200';
   };
 
-  const getStatusKorean = (status: string) => {
-    switch (status) {
-      case 'Prohibited': return '금지';
-      case 'Permitted': return '허용';
-      case 'Conditional': return '조건부';
-      case 'Neutral': return '중립';
-      case 'Ambiguous': return '모호함';
-      default: return status;
-    }
+  const getRiskText = (score: string) => {
+    if (score === 'Red') return '위험 (Red)';
+    if (score === 'Yellow') return '조건부/주의 (Yellow)';
+    if (score === 'Green') return '안전 (Green)';
+    return score;
+  };
+
+  // Helper to render inline citations like [1], [2] as clickable jump links
+  const renderTextWithCitations = (text: string) => {
+    if (!text) return null;
+    const parts = text.split(/(\[\d+\])/g);
+
+    const scrollToRef = (refId: string) => {
+      const el = document.getElementById(refId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('bg-yellow-100');
+        setTimeout(() => el.classList.remove('bg-yellow-100'), 2000);
+      }
+    };
+
+    return parts.map((part, index) => {
+      const match = part.match(/\[(\d+)\]/);
+      if (match) {
+        const refIndex = match[1];
+        return (
+          <button
+            key={index}
+            onClick={() => scrollToRef(`reference-${refIndex}`)}
+            className="text-[10px] font-bold text-blue-600 ml-0.5 mr-0.5 select-none hover:underline cursor-pointer bg-blue-50 px-1 rounded-sm align-super leading-none"
+            title={`${refIndex}번 법적 근거 확인`}
+            data-html2canvas-ignore
+          >
+            {part}
+          </button>
+        );
+      }
+      return <span key={index}>{part}</span>;
+    });
   };
 
   return (
-    <main className="min-h-screen p-4 md:p-8 font-sans bg-[#fdfdfd] pb-20">
-      <div className="max-w-3xl mx-auto space-y-8 md:space-y-10">
+    <div className="h-screen font-sans bg-[#fdfdfd] flex overflow-hidden">
+      {/* 
+        ========================================
+        LEFT PANEL: CHAT & HEADER 
+        ========================================
+      */}
+      <aside className="w-full md:w-[400px] lg:w-[450px] flex-shrink-0 flex flex-col border-r border-slate-200 bg-white shadow-[2px_0_20px_rgba(0,0,0,0.02)] z-10 relative h-full">
 
-        {/* Header - Mobile Friendly */}
-        <header className="space-y-3 border-b border-slate-200 pb-6">
+        {/* Header */}
+        <header className="p-5 md:p-6 border-b border-slate-100 bg-white shrink-0">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-8 h-8 md:w-10 md:h-10 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
               <Scale className="w-5 h-5 md:w-6 md:h-6 text-white" />
             </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-slate-900 tracking-tight">
+            <h1 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight">
               MIRI AI 법률 자문
             </h1>
           </div>
-          <p className="text-slate-500 text-sm md:text-base ml-1 leading-relaxed">
-            사업 아이디어 검토부터 계약, 분쟁, 일상생활 법률 문제까지.<br className="hidden md:block" />
-            AI가 수천 건의 법령와 판례를 분석하여 핵심 법적 조언을 즉시 제공합니다.
+          <p className="text-slate-500 text-xs md:text-sm ml-1 leading-relaxed">
+            사업 아이디어를 입력하면 법률 진단 및 로드맵을 그려줍니다.
           </p>
         </header>
 
-        {/* Input Section - Responsive */}
-        <section>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-700 ml-1">상담 내용 입력</label>
+        {/* Chat History Area (Scrollable flex-1) */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4 pb-4">
+          {chatHistory.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center p-6 text-slate-400 space-y-3">
+              <Bot className="w-12 h-12 text-slate-200 mb-2" />
+              <p className="text-sm font-medium">채팅을 시작해 보세요!</p>
+              <p className="text-xs">오른쪽 메인 화면에 진행 상황과 전체 로드맵이 그려집니다.</p>
+            </div>
+          ) : (
+            <AnimatePresence>
+              {chatHistory.map((msg) => (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  {msg.role === 'assistant' && (
+                    <div className="w-8 h-8 rounded-full bg-slate-900 border-2 border-white shadow-sm flex items-center justify-center mr-2 shrink-0 mt-auto mb-1">
+                      <Bot className="w-4 h-4 text-white" />
+                    </div>
+                  )}
+
+                  <div
+                    className={`max-w-[85%] px-4 py-3 shadow-md backdrop-blur-md ${msg.role === 'user'
+                      ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm'
+                      : 'bg-white/95 border border-slate-200 text-slate-800 rounded-2xl rounded-tl-sm'
+                      }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap leading-relaxed">
+                      {msg.role === 'assistant' ? renderTextWithCitations(msg.content) : msg.content}
+                    </p>
+                  </div>
+
+                  {msg.role === 'user' && (
+                    <div className="w-8 h-8 rounded-full bg-blue-100 border-2 border-white shadow-sm flex items-center justify-center ml-2 shrink-0 mt-auto mb-1">
+                      <User className="w-4 h-4 text-blue-600" />
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+              <div ref={chatEndRef} />
+            </AnimatePresence>
+          )}
+        </div>
+
+        {/* Input Area (Bottom of Left Panel) */}
+        <div className="p-4 bg-white border-t border-slate-200 shrink-0">
+          <form onSubmit={handleSubmit} className="relative flex flex-col gap-2">
+            <div className="overflow-hidden bg-slate-50 border border-slate-300 focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 rounded-xl shadow-inner transition-all duration-200 p-2">
               <textarea
                 value={idea}
                 onChange={(e) => setIdea(e.target.value)}
-                placeholder="궁금한 법률 문제나 검토가 필요한 내용을 구체적으로 적어주세요.&#13;&#10;&#13;&#10;[예시]&#13;&#10;- 사업: 주택가 빈 주차면 공유 서비스가 합법인가요?&#13;&#10;- 계약: 프리랜서 용역 계약서에서 독소 조항 점검&#13;&#10;- 분쟁: 윗집 누수로 인한 피해보상 청구 절차&#13;&#10;- 일상: 회사에서 부당해고를 당했을 때 대처 방법"
-                className="modern-input w-full h-40 md:h-56 p-4 md:p-5 text-sm md:text-[16px] leading-relaxed resize-none"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!loading && idea.trim()) {
+                      handleSubmit(e);
+                    }
+                  }
+                }}
+                placeholder={
+                  chatHistory.length === 0
+                    ? "어떤 사업을 구상 중이신가요?\n(예: 강아지 간식 제조 공장 창업)"
+                    : "추가로 궁금한 점이나 조건을 입력하세요."
+                }
+                className="w-full max-h-32 min-h-[60px] p-2 text-sm leading-relaxed resize-none outline-none custom-scrollbar bg-transparent"
+                rows={idea.split('\n').length > 1 ? Math.min(idea.split('\n').length, 4) : 1}
               />
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={loading || !idea.trim()}
-                className="btn-primary w-full md:w-auto"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    검토 진행 중...
-                  </>
-                ) : (
-                  <>
-                    <Search className="w-4 h-4" />
-                    검토 요청
-                  </>
-                )}
-              </button>
-            </div>
-          </form>
-        </section>
-
-        {/* Live Logs Section */}
-        <AnimatePresence>
-          {(loading || (logs.length > 0 && !result)) && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              className="mt-6 bg-slate-50 rounded-lg border border-slate-200 p-4"
-            >
-              <div className="flex items-center justify-between mb-3 border-b border-slate-200 pb-2">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Processing Log</span>
-                {loading && <span className="text-xs font-mono text-slate-400">{timer.toFixed(1)}s</span>}
-              </div>
-              <div className="h-32 md:h-40 overflow-y-auto custom-scrollbar font-mono text-xs space-y-2 text-slate-600">
-                {logs.map((log, i) => (
-                  <div key={i} className="flex gap-2">
-                    <span className="text-slate-300 select-none">›</span>
-                    <span>{log}</span>
-                  </div>
-                ))}
-                <div ref={logsEndRef} />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Results Section */}
-        <AnimatePresence>
-          {result && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.4 }}
-              className="space-y-8 pt-6"
-              ref={reportRef}
-            >
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-end border-b-2 border-slate-900 pb-4 gap-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-slate-900">검토 결과 보고서</h2>
-                  <p className="text-slate-500 text-sm mt-1">Generated by MIRI System</p>
-                </div>
-                <div className="flex items-center gap-2 self-end md:self-auto">
-                  {/* Visual Only Tag */}
-                  <span className={`px-3 py-1 rounded-md text-sm font-bold border
-                        ${result.verdict.verdict === 'Safe' ? 'bg-green-50 text-green-700 border-green-200' :
-                      result.verdict.verdict === 'Danger' ? 'bg-red-50 text-red-700 border-red-200' :
-                        'bg-yellow-50 text-yellow-700 border-yellow-200'}
-                      `}>
-                    {getVerdictKorean(result.verdict.verdict)}
-                  </span>
-                  <button
-                    onClick={handleDownloadPDF}
-                    data-html2canvas-ignore
-                    className="btn-secondary text-xs px-3 py-1 h-8"
-                  >
-                    <Download className="w-3 h-3" /> PDF
-                  </button>
-                </div>
-              </div>
-
-              {/* 1. Summary */}
-              <section className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-slate-500" />
-                  종합 요약
-                </h3>
-                <div className="paper-panel p-5 md:p-6 bg-slate-50/50">
-                  <div className="text-slate-800 leading-7 font-medium whitespace-pre-wrap text-sm md:text-base">
-                    {(() => {
-                      const text = result.verdict.summary;
-                      // Click Handler
-                      const scrollToEvidence = (index: number) => {
-                        const element = document.getElementById(`evidence-${index}`);
-                        if (element) {
-                          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                          // Highlight effect
-                          element.classList.add('bg-yellow-50');
-                          setTimeout(() => element.classList.remove('bg-yellow-50'), 2000);
-                        }
-                      };
-
-                      // Simple Markdown Parser
-                      const parts = text.split(/(\*\*.*?\*\*|\[\d+\])/g);
-                      return parts.map((part, index) => {
-                        if (part.startsWith('**') && part.endsWith('**')) {
-                          return <strong key={index} className="text-slate-900 font-bold bg-slate-100 px-1 rounded">{part.slice(2, -2)}</strong>;
-                        }
-                        if (/^\[(\d+)\]$/.test(part)) {
-                          const evidenceIndex = parseInt(part.match(/\d+/)?.[0] || '0');
-                          return (
-                            <button
-                              key={index}
-                              onClick={() => scrollToEvidence(evidenceIndex)}
-                              className="text-[10px] font-bold text-blue-600 ml-0.5 select-none hover:underline cursor-pointer bg-blue-50 px-1 rounded-sm align-top leading-none mt-1"
-                              title={`${evidenceIndex}번 근거 자료로 이동`}
-                            >
-                              [{evidenceIndex}]
-                            </button>
-                          );
-                        }
-                        return part;
-                      });
-                    })()}
-                  </div>
-
-                  {result.verdict.key_issues && result.verdict.key_issues.length > 0 && (
-                    <div className="mt-6 space-y-3">
-                      <h4 className="text-sm font-bold text-slate-500 uppercase">주요 법적 쟁점</h4>
-                      <ul className="space-y-2">
-                        {result.verdict.key_issues.map((issue, idx) => (
-                          <li key={idx} className="flex items-start gap-2 text-sm text-slate-700">
-                            <AlertTriangle className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
-                            <span className="flex-1">{issue}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              {/* 2. Scenario Analysis */}
-              <section className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800 border-t border-slate-100 pt-6">
-                  분석된 시나리오 구조
-                </h3>
-                <div className="paper-panel p-5 md:p-6">
-                  <h4 className="font-bold text-slate-800 mb-4">{result.scenario.name}</h4>
-                  <ul className="space-y-0 divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
-                    {result.scenario.actions.map((action: any, idx: number) => (
-                      <li key={idx} className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 p-4 bg-white text-sm">
-                        <div className="flex items-center gap-2 md:w-auto">
-                          <span className="w-6 h-6 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full text-xs font-bold shrink-0">
-                            {idx + 1}
-                          </span>
-                          <div className="font-semibold text-slate-900 md:hidden">{action.actor}</div>
-                        </div>
-
-                        <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-1 md:gap-2 ml-8 md:ml-0">
-                          <div className="font-semibold text-slate-900 hidden md:block">{action.actor}</div>
-                          <div className="text-slate-600 md:col-span-2">{action.action}</div>
-                        </div>
-                        {action.object && (
-                          <span className="text-xs bg-slate-50 text-slate-500 px-2 py-1 rounded border border-slate-100 self-start ml-8 md:ml-0 md:self-auto">
-                            {action.object}
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </section>
-
-              {/* 3. Detailed Legal Evidence */}
-              <section className="space-y-4">
-                <h3 className="text-lg font-bold text-slate-800 border-t border-slate-100 pt-6">
-                  관련 법령 상세 검토
-                </h3>
-
-                <div className="space-y-4">
-                  {(() => {
-                    let globalEvidenceIndex = 0;
-
-                    const grouped = result.evidence.reduce((acc, item) => {
-                      const key = item.law_name || '기타 자료';
-                      if (!acc[key]) acc[key] = [];
-                      acc[key].push(item);
-                      return acc;
-                    }, {} as Record<string, DocumentReview[]>);
-
-                    return Object.entries(grouped).map(([lawName, items], groupIdx) => (
-                      <div key={groupIdx} className="paper-panel p-5 md:p-6">
-                        <h4 className="font-bold text-base text-slate-900 mb-4 pb-2 border-b border-slate-100">
-                          {lawName}
-                        </h4>
-                        <div className="space-y-6">
-                          {items.map((item, idx) => {
-                            globalEvidenceIndex++;
-                            const currentId = globalEvidenceIndex;
-                            return (
-                              <div key={idx} id={`evidence-${currentId}`} className="space-y-2 transition-colors duration-1000 rounded-lg p-2 -m-2">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-xs font-bold text-slate-400 mr-1 select-none">#{currentId}</span>
-                                  <span className={`w-2 h-2 rounded-full shrink-0
-                                          ${item.status === 'Prohibited' ? 'bg-red-500' :
-                                      item.status === 'Permitted' ? 'bg-green-500' :
-                                        item.status === 'Conditional' ? 'bg-yellow-500' : 'bg-slate-300'}
-                                      `} />
-                                  <span className="font-semibold text-slate-800 text-sm">
-                                    {item.key_clause}
-                                  </span>
-                                  <span className="text-xs text-slate-400">
-                                    ({getStatusKorean(item.status)})
-                                  </span>
-                                </div>
-                                <p className="text-sm text-slate-600 leading-relaxed pl-4 border-l-2 border-slate-100 ml-1">
-                                  {item.summary}
-                                </p>
-                                {item.url && (
-                                  <div className="pl-4 ml-1">
-                                    <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-blue-600 hover:underline flex items-center gap-1">
-                                      <ExternalLink className="w-3 h-3" /> 원문 보기
-                                    </a>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ));
-                  })()}
-                </div>
-              </section>
-
-              {/* References */}
-              {result.references.length > 0 && (
-                <section className="pt-8 text-xs text-slate-400 border-t border-slate-200">
-                  <h5 className="font-bold mb-2 flex items-center gap-1">
-                    <BookOpen className="w-3 h-3" /> 참고 문헌
-                  </h5>
-                  <ul className="space-y-1 list-disc list-inside">
-                    {result.references.map((ref, idx) => (
-                      <li key={idx}>
-                        {ref.title}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {/* Feedback Call-to-Action Card */}
-              <div className="mt-8 p-6 bg-blue-50 border border-blue-100 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="space-y-1 text-center md:text-left">
-                  <h4 className="font-bold text-blue-900 flex items-center justify-center md:justify-start gap-2">
-                    <span className="text-xl">📢</span> 여러분의 의견을 들려주세요!
-                  </h4>
-                  <p className="text-sm text-blue-700">
-                    MIRI는 베타 서비스 중입니다. 법률 검토 결과가 도움이 되셨나요?<br className="hidden md:block" />
-                    잠깐 시간을 내어 설문에 참여해주시면 더 나은 서비스를 만드는 데 큰 힘이 됩니다.
-                  </p>
-                </div>
-                <a
-                  href="https://forms.gle/T6HdSETTmpTXaUEv6"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition-colors shadow-sm whitespace-nowrap flex items-center gap-2"
+              <div className="flex justify-between items-center mt-1 px-1">
+                <span className="text-[10px] text-slate-400 font-medium">Shift + Enter 로 줄바꿈</span>
+                <button
+                  type="submit"
+                  disabled={loading || !idea.trim()}
+                  className="bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed p-2 rounded-lg font-bold flex items-center justify-center transition-colors shadow-sm shrink-0 h-9 w-9"
                 >
-                  설문조사 참여하기 <ExternalLink className="w-4 h-4" />
-                </a>
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <ArrowRight className="w-4 h-4" />
+                  )}
+                </button>
               </div>
+            </div>
+            {chatHistory.length === 0 && (
+              <p className="text-[9px] text-slate-400 mt-1 max-w-full text-center leading-tight">
+                [면책 조항] 본 결과는 법적 효력이 무효하므로 실제 진행시 변호사의 자문을 구하십시오. © MIRI
+              </p>
+            )}
+          </form>
+        </div>
+      </aside>
 
-            </motion.div>
+      {/* 
+        ========================================
+        RIGHT PANEL: ROADMAP & RESULTS 
+        ========================================
+      */}
+      <main className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50/50 relative">
+        <div className="max-w-4xl mx-auto p-4 md:p-8 lg:p-12 space-y-8 pb-32">
+
+          {/* Welcome Placeholder / Logs */}
+          {!result && chatHistory.length === 0 && !loading && (
+            <div className="h-[60vh] flex flex-col items-center justify-center text-center opacity-40 select-none">
+              <Scale className="w-24 h-24 mb-6 text-slate-300" />
+              <h2 className="text-3xl font-bold text-slate-400 mb-2">당신의 비즈니스를 위한 견고한 토대</h2>
+              <p className="text-slate-500">좌측 채팅창에 텍스트를 입력하여 로드맵 분석을 시작하세요.</p>
+            </div>
           )}
-        </AnimatePresence>
 
-        {/* Safety Disclaimer Footer */}
-        <footer className="mt-20 pt-8 border-t border-slate-200 text-center space-y-2">
-          <div className="flex justify-center mb-2">
-            <AlertTriangle className="w-5 h-5 text-slate-400" />
-          </div>
-          <p className="text-xs text-slate-500 font-medium">
-            [면책 조항] 본 서비스는 베타 테스트 버전이며, 인공지능이 생성한 분석 결과는 법적 효력이 없습니다.
-          </p>
-          <p className="text-xs text-slate-400 leading-relaxed max-w-xl mx-auto">
-            제공되는 정보는 참고용으로만 활용되어야 하며, 실제 사업 진행 시에는 반드시 변호사 등 법률 전문가의 자문을 구하셔야 합니다.
-            서비스 이용에 따른 최종적인 의사결정과 법적 책임은 사용자 본인에게 있습니다.
-          </p>
-          <div className="pt-4">
-            <a
-              href="https://forms.gle/T6HdSETTmpTXaUEv6"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 font-medium hover:underline"
-            >
-              <Info className="w-3 h-3" />
-              서비스 개선을 위한 설문조사 참여하기
-            </a>
-          </div>
-          <p className="text-[10px] text-slate-300 pt-4">
-            © 2026 MIRI System. All rights reserved.
-          </p>
-        </footer>
+          {/* Live Logs Section */}
+          <AnimatePresence>
+            {(loading || (logs.length > 0 && !result)) && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 mt-4"
+              >
+                <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-3">
+                  <span className="text-xs font-bold text-slate-500 flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                    AGENT WORKFLOW LOG
+                  </span>
+                  {loading && <span className="text-xs font-mono font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">{timer.toFixed(1)}s 경과</span>}
+                </div>
+                <div
+                  ref={logsContainerRef}
+                  className="h-32 md:h-48 overflow-y-auto custom-scrollbar font-mono text-[11px] space-y-2 text-slate-600"
+                >
+                  {logs.map((log, i) => (
+                    <div key={i} className="flex gap-2 items-start hover:bg-slate-50 p-1 rounded transition-colors">
+                      <span className="text-slate-300 select-none mt-0.5">›</span>
+                      <span className="leading-relaxed">{log}</span>
+                    </div>
+                  ))}
+                  <div ref={logsEndRef} />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-      </div>
-    </main>
+          {/* Results Section */}
+          <AnimatePresence>
+            {result && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.4 }}
+                className="space-y-8"
+                ref={reportRef}
+              >
+                {/* Header */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-end border-b-2 border-slate-900 pb-4 gap-4 bg-white/50 p-6 rounded-2xl shadow-sm border border-slate-100">
+                  <div>
+                    <h2 className="text-3xl font-bold text-slate-900">결과: 규제 통과 로드맵</h2>
+                    <p className="text-slate-500 text-sm mt-2 flex items-center gap-1">
+                      <Info className="w-4 h-4" /> 생성된 문서는 우측상단 PDF로 다운로드 가능합니다.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 self-end md:self-auto">
+                    <span className={`px-3 py-1.5 rounded-md text-sm font-bold border ${getRiskColor(result?.risk_evaluation?.score || '')}`}>
+                      {getRiskText(result?.risk_evaluation?.score || '분석 중')}
+                    </span>
+                    <button onClick={handleDownloadPDF} data-html2canvas-ignore className="btn-secondary text-sm px-4 py-1.5 h-auto flex items-center gap-2">
+                      <Download className="w-4 h-4" /> PDF 추출
+                    </button>
+                  </div>
+                </div>
+
+                {/* [NEW] What-If Interactive Toggles */}
+                {result.what_ifs && result.what_ifs.length > 0 && (
+                  <section className="bg-blue-50 border border-blue-200 rounded-2xl p-6 shadow-sm" data-html2canvas-ignore>
+                    <div className="flex items-center gap-2 mb-4">
+                      <GitBranch className="w-5 h-5 text-blue-600" />
+                      <h3 className="text-lg font-bold text-slate-800">What-If 시나리오 탐색기</h3>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-5 pl-7 border-l-2 border-blue-200">
+                      현재 사업 모델에서 잠재적으로 발생할 수 있는 추가 변수들입니다.
+                      해당되는 항목을 체크하면 좌측 채팅 에이전트가 반영하여 로드맵을 지능적으로 업데이트합니다.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pl-7">
+                      {result.what_ifs.map((trigger, idx) => {
+                        const isActive = selectedWhatIfs.includes(trigger.variable_name);
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => handleWhatIfToggle(trigger.variable_name)}
+                            className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all ${isActive ? 'bg-blue-600 border-blue-700 text-white shadow-md' : 'bg-white border-slate-200 text-slate-700 hover:border-blue-300 hover:shadow-sm'
+                              }`}
+                          >
+                            <div className="mt-0.5">
+                              {isActive ? <CheckSquare className="w-5 h-5 opacity-90" /> : <Square className="w-5 h-5 opacity-40 text-slate-400" />}
+                            </div>
+                            <div>
+                              <div className={`font-bold text-sm ${isActive ? 'text-white' : 'text-slate-900'}`}>{trigger.variable_name}</div>
+                              <div className={`text-xs mt-1.5 leading-relaxed ${isActive ? 'text-blue-100' : 'text-slate-500'}`}>{trigger.description}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
+
+                {/* 1. Risk Evaluation Summary */}
+                {result.risk_evaluation && (
+                  <section className="space-y-4">
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2 pl-2 border-l-4 border-slate-800">
+                      리스크 상세 요약
+                    </h3>
+                    <div className="paper-panel p-6 bg-white shadow-sm rounded-2xl border border-slate-100">
+                      <p className="text-[15px] border-l-4 border-slate-200 pl-5 py-2 text-slate-700 leading-relaxed font-medium whitespace-pre-wrap bg-slate-50/50 rounded-r-lg">
+                        {renderTextWithCitations(result.risk_evaluation.rationale)}
+                      </p>
+
+                      {result.risk_evaluation.key_hurdles && result.risk_evaluation.key_hurdles.length > 0 && (
+                        <div className="mt-8 space-y-4">
+                          <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                            <ShieldAlert className="w-4 h-4 text-orange-500" />
+                            극복해야 할 주요 허들
+                          </h4>
+                          <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {result.risk_evaluation.key_hurdles.map((hurdle, idx) => (
+                              <li key={idx} className="flex items-start gap-3 bg-orange-50/50 border border-orange-100/50 p-4 rounded-xl text-sm text-slate-700 shadow-sm">
+                                <AlertTriangle className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
+                                <span className="flex-1 leading-relaxed font-medium text-slate-800">{hurdle}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {/* 2. Decision Tree Roadmap */}
+                {result.roadmap && result.roadmap.length > 0 && (
+                  <section className="space-y-6 pt-6">
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2 pl-2 border-l-4 border-blue-600">
+                      실행 로드맵 (Decision Tree)
+                    </h3>
+                    <div className="space-y-6 relative pl-4 md:pl-8">
+                      {/* Vertical Connecting Line */}
+                      <div className="absolute left-[30px] md:left-[50px] top-8 bottom-8 w-1 bg-slate-100 z-0 rounded-full"></div>
+
+                      {result.roadmap.map((step, idx) => (
+                        <div key={idx} className="relative z-10 flex flex-col md:flex-row gap-6">
+                          {/* Step Marker */}
+                          <div className="flex flex-col items-center pt-1 shrink-0">
+                            <div className="w-14 h-14 bg-blue-600 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-md border-4 border-slate-50">
+                              {step.phase}
+                            </div>
+                          </div>
+
+                          {/* Step Content */}
+                          <div className="flex-1 bg-white p-6 shadow-md rounded-2xl border border-slate-200 hover:border-blue-300 transition-colors">
+                            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 mb-4 border-b border-slate-100 pb-4">
+                              <h4 className="font-bold text-xl text-slate-900 tracking-tight">
+                                {step.title}
+                              </h4>
+                              <span className="inline-flex items-center gap-1.5 text-xs font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-lg w-fit shrink-0">
+                                <Clock className="w-3.5 h-3.5" /> 소요 예상: {step.estimated_time}
+                              </span>
+                            </div>
+
+                            <p className="text-[15px] text-slate-600 mb-6 leading-relaxed">
+                              {renderTextWithCitations(step.description)}
+                            </p>
+
+                            {/* Action Items List */}
+                            {step.action_items && step.action_items.length > 0 && (
+                              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                                <table className="w-full text-sm text-left">
+                                  <thead className="bg-slate-50 text-slate-600 text-xs font-bold uppercase tracking-wider border-b border-slate-200">
+                                    <tr>
+                                      <th className="px-5 py-3 w-1/4 min-w-[120px]">주관 부처</th>
+                                      <th className="px-5 py-3 border-l border-slate-200">핵심 절차 및 인허가 요건</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100 bg-white">
+                                    {step.action_items.map((action, aIdx) => (
+                                      <tr key={aIdx} className="hover:bg-slate-50/50 transition-colors group">
+                                        <td className="px-5 py-4 font-bold text-slate-700 align-top">
+                                          <span className="bg-slate-100 px-2.5 py-1 rounded text-xs">{action.submission_agency}</span>
+                                        </td>
+                                        <td className="px-5 py-4 align-top border-l border-slate-100">
+                                          <div className="font-bold text-slate-900 mb-2 text-base group-hover:text-blue-700 transition-colors">{action.step_name}</div>
+
+                                          {action.required_documents.length > 0 && (
+                                            <div className="mb-3 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                                              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">필요 제출 서류 목록</div>
+                                              <ul className="list-disc list-inside text-slate-700 text-xs leading-relaxed space-y-1">
+                                                {action.required_documents.map((doc, dIdx) => (
+                                                  <li key={dIdx} className="marker:text-blue-500">{doc}</li>
+                                                ))}
+                                              </ul>
+                                            </div>
+                                          )}
+
+                                          <div className="text-xs text-slate-600 bg-blue-50/50 p-3 border border-blue-100/50 rounded-lg leading-relaxed flex items-start gap-2">
+                                            <span className="text-base leading-none">💡</span>
+                                            <div>{renderTextWithCitations(action.context)}</div>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* 3. Cross-Domain Mapping */}
+                {result.cross_domains && result.cross_domains.length > 0 && (
+                  <section className="space-y-6 pt-6">
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2 pl-2 border-l-4 border-indigo-600">
+                      도메인 교차 분석 (Cross-Domain Insights)
+                    </h3>
+                    <div className="grid grid-cols-1 gap-5">
+                      {result.cross_domains.map((cd, idx) => (
+                        <div key={idx} className="bg-white p-6 shadow-sm rounded-2xl border border-slate-200">
+                          <div className="flex flex-col lg:flex-row items-center justify-between gap-4 mb-6 relative">
+                            <div className="flex-1 w-full text-center lg:text-left bg-slate-50 px-5 py-4 rounded-xl border border-slate-200">
+                              <span className="text-xs font-bold text-slate-400 block mb-1">현행 규제 모델 (AS-IS)</span>
+                              <span className="font-bold text-slate-800 text-lg">{cd.source_domain}</span>
+                            </div>
+
+                            <div className="bg-white p-2 rounded-full border border-slate-100 shadow-sm z-10 my-2 lg:my-0">
+                              <ArrowRight className="w-5 h-5 text-indigo-400 rotate-90 lg:rotate-0" />
+                            </div>
+
+                            <div className="flex-1 w-full text-center lg:text-left bg-indigo-50 px-5 py-4 rounded-xl border border-indigo-100 shadow-inner">
+                              <span className="text-xs font-bold text-indigo-400 block mb-1">목표 신사업 모델 (TO-BE)</span>
+                              <span className="font-bold text-indigo-900 text-lg">{cd.target_domain}</span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-sm mt-4 lg:px-2">
+                            <div className="bg-slate-50 p-4 rounded-xl">
+                              <span className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
+                                주관 부처 변경
+                              </span>
+                              <p className="text-slate-800 font-medium">{cd.agency_mapping}</p>
+                            </div>
+                            <div className="bg-slate-50 p-4 rounded-xl">
+                              <span className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">
+                                적용 법령 변경
+                              </span>
+                              <p className="text-slate-800 font-medium">{cd.law_mapping}</p>
+                            </div>
+                            <div className="md:col-span-2 bg-gradient-to-r from-indigo-50/50 to-white border border-indigo-100/50 p-5 rounded-xl mt-2 shadow-sm">
+                              <span className="block text-xs font-bold text-indigo-600 mb-2 tracking-wide">핵심 규제 차이점 집중 포인트</span>
+                              <p className="text-slate-700 leading-relaxed font-medium">{cd.key_differences}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* References */}
+                {result.references && result.references.length > 0 && (
+                  <section className="pt-10 pb-6 border-t-2 border-dashed border-slate-200">
+                    <h5 className="font-bold mb-5 flex items-center gap-2 text-slate-800 text-lg">
+                      <BookOpen className="w-5 h-5 text-blue-600" /> 공식 법령 및 참고 판례 증빙
+                    </h5>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {result.references.map((ref, idx) => (
+                        <div
+                          key={idx}
+                          id={`reference-${idx + 1}`}
+                          className="bg-white hover:bg-slate-50 p-4 rounded-xl border border-slate-200 transition-colors shadow-sm group"
+                        >
+                          <div className="font-bold text-slate-800 mb-2 flex items-start gap-2">
+                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs shrink-0 mt-0.5">[{idx + 1}]</span>
+                            <span className="title leading-snug group-hover:text-blue-700 transition-colors">{ref.title}</span>
+                          </div>
+                          {ref.url && (
+                            <div className="pl-9 pb-1">
+                              <a
+                                href={ref.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 border border-blue-100 hover:border-blue-300 hover:bg-blue-600 hover:text-white text-blue-700 rounded-lg text-xs font-bold transition-all shadow-sm"
+                              >
+                                국가법령정보센터 원문 보기 <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+        </div>
+      </main>
+
+    </div>
   );
 }
