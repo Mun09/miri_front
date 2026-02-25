@@ -62,16 +62,16 @@ export default function Home() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatHistory]);
 
-  const runAnalysis = async (currentIdea: string, whatIfs: string[]) => {
+  const runAnalysis = async (currentIdea: string, whatIfs: string[], isWhatIfOnly: boolean = false) => {
     setLoading(true);
     // DO NOT CLEAR RESULT. We only clear logs to show new thinking process.
     setLogs([]);
     setExecutionTime(null);
     const startTime = performance.now();
 
-    // Add User Message to Chat History
+    // Add User Message to Chat History (skip for What-If-only updates)
     const userMsgId = Date.now().toString();
-    if (currentIdea.trim()) {
+    if (currentIdea.trim() && !isWhatIfOnly) {
       setChatHistory(prev => [...prev, { id: userMsgId, role: 'user', content: currentIdea }]);
     }
 
@@ -80,7 +80,12 @@ export default function Home() {
       const response = await fetch(`${apiUrl}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea: currentIdea, what_ifs: whatIfs, thread_id: sessionId }),
+        body: JSON.stringify({
+          idea: currentIdea,
+          what_ifs: whatIfs,
+          thread_id: sessionId,
+          is_whatif_only: isWhatIfOnly,
+        }),
       });
 
       if (!response.body) throw new Error("No response body");
@@ -103,6 +108,15 @@ export default function Home() {
             const data = JSON.parse(line);
             if (data.type === 'log') {
               setLogs(prev => [...prev, data.message]);
+            } else if (data.type === 'error_log') {
+              // Pipeline errors: display as warnings in both logs and chat
+              setLogs(prev => [...prev, data.message]);
+              setChatHistory(prev => [...prev, {
+                id: Date.now().toString() + "_err",
+                role: 'assistant',
+                content: data.message,
+                isSystem: true
+              }]);
             } else if (data.type === 'chat_message') {
               // Add Assistant Chat Message
               setChatHistory(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: data.message }]);
@@ -133,7 +147,7 @@ export default function Home() {
       }
     } catch (error: any) {
       console.error("Analysis Failed:", error);
-      setChatHistory(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: `🚨 오류 발생: ${error.message || "서버 응답 없음"}` }]);
+      setChatHistory(prev => [...prev, { id: Date.now().toString(), role: 'assistant', content: `오류 발생: ${error.message || "서버 응답 없음"}` }]);
     } finally {
       setLoading(false);
     }
@@ -145,7 +159,7 @@ export default function Home() {
     const submittedIdea = idea;
     setIdea(''); // Clear input box immediately
     // Note: We deliberately don't clear selectedWhatIfs so constraints stack
-    runAnalysis(submittedIdea, selectedWhatIfs);
+    runAnalysis(submittedIdea, selectedWhatIfs, false);
   };
 
   const handleWhatIfToggle = (variableName: string) => {
@@ -155,7 +169,7 @@ export default function Home() {
       : [...selectedWhatIfs, variableName];
 
     setSelectedWhatIfs(newWhatIfs);
-    runAnalysis(idea, newWhatIfs);
+    runAnalysis("", newWhatIfs, true); // What-If only: skip structurer+investigator
   };
 
   const handleDownloadPDF = async () => {
